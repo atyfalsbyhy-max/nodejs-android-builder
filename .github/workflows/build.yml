@@ -1,33 +1,120 @@
-name: Build Node.js 24.11.0 for Android
+name: Build Node.js 24.11.0 for Android ARM64
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-android:
-    runs-on: ubuntu-latest
-    
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
     steps:
-    - name: Checkout Node.js Source
-      uses: actions/checkout@v4
-      with:
-        repository: nodejs/node
-        ref: v24.11.0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            g++ \
+            python3 \
+            make \
+            ninja-build \
+            perl \
+            pkg-config \
+            curl \
+            xz-utils \
+            tar \
+            unzip
 
-    - name: Set up Android NDK
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: r27b
+      - name: Install Android SDK command line tools
+        uses: android-actions/setup-android@v3
 
-    - name: Configure and Build Node.js
-      run: |
-        source ./android-configure $ANDROID_NDK_HOME 24 arm64
-        make -j$(nproc)
-      env:
-        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "ndk;29.0.14206865"
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: node-v24.11.0-android-arm64
-        path: out/Release/node
+      - name: Download Node.js source
+        run: |
+          curl -fL --retry 5 \
+            -o node-v24.11.0.tar.xz \
+            https://nodejs.org/dist/v24.11.0/node-v24.11.0.tar.xz
+
+          curl -fsSL \
+            https://nodejs.org/dist/v24.11.0/SHASUMS256.txt \
+            | grep 'node-v24.11.0.tar.xz' > node.sha256
+
+          sha256sum -c node.sha256
+          tar -xf node-v24.11.0.tar.xz
+
+      - name: Configure Node for Android ARM64
+        working-directory: node-v24.11.0
+        run: |
+          export NDK="$ANDROID_HOME/ndk/29.0.14206865"
+          export API=35
+          export TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          export PREFIX="$GITHUB_WORKSPACE/node-24.11.0-android-arm64"
+
+          export PATH="$TOOLCHAIN/bin:$PATH"
+          export CC="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang"
+          export CXX="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export LD="$TOOLCHAIN/bin/ld.lld"
+
+          export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK"
+
+          ./configure \
+            --dest-cpu=arm64 \
+            --dest-os=android \
+            --openssl-no-asm \
+            --cross-compiling \
+            --prefix="$PREFIX"
+
+      - name: Build Node.js
+        working-directory: node-v24.11.0
+        run: |
+          make -j2
+
+      - name: Install Node.js into package directory
+        working-directory: node-v24.11.0
+        run: |
+          export PREFIX="$GITHUB_WORKSPACE/node-24.11.0-android-arm64"
+          make install
+
+      - name: Verify binary and create archive
+        run: |
+          set -e
+
+          test -x node-24.11.0-android-arm64/bin/node
+
+          mkdir -p node-24.11.0-android-arm64
+          cat > node-24.11.0-android-arm64/README.txt <<'EOF'
+          Node.js 24.11.0 built for Android ARM64.
+          
+          Installation:
+          export NODE_HOME=/path/to/node-24.11.0-android-arm64
+          export PATH="$NODE_HOME/bin:$PATH"
+          node --version
+          npm --version
+          EOF
+
+          node-24.11.0-android-arm64/bin/node --version || true
+
+          tar -czf \
+            node-v24.11.0-android-arm64.tar.gz \
+            node-24.11.0-android-arm64
+
+          sha256sum node-v24.11.0-android-arm64.tar.gz \
+            > node-v24.11.0-android-arm64.tar.gz.sha256
+
+      - name: Upload built Node package
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-v24.11.0-android-arm64
+          path: |
+            node-v24.11.0-android-arm64.tar.gz
+            node-v24.11.0-android-arm64.tar.gz.sha256
+          retention-days: 14
