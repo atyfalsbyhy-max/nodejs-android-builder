@@ -19,15 +19,12 @@ jobs:
       with:
         ndk-version: r27b
 
-    - name: Configure Build Environment
+    - name: Configure and Build Node.js
       run: |
-        bash ./android-configure $ANDROID_NDK_HOME 24 arm64
+        source ./android-configure $ANDROID_NDK_HOME 24 arm64
+        make -j$(nproc)
       env:
         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-
-    - name: Build Node.js
-      run: |
-        make -j$(nproc)
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
