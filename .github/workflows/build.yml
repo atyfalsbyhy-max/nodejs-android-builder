@@ -1,0 +1,36 @@
+name: Build Node.js 24.11.0 for Android
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Node.js Source
+      uses: actions/checkout@v4
+      with:
+        repository: nodejs/node
+        ref: v24.11.0
+
+    - name: Set up Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r27b
+
+    - name: Configure Build Environment
+      run: |
+        bash ./android-configure $ANDROID_NDK_HOME 24 arm64
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+    - name: Build Node.js
+      run: |
+        make -j$(nproc)
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: node-v24.11.0-android-arm64
+        path: out/Release/node
